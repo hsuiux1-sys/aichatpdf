@@ -1,6 +1,13 @@
 import sys
-__import__("pysqlite3")
-sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+import os
+
+# Streamlit Cloud(Linux)에서만 pysqlite3 사용
+if os.environ.get("STREAMLIT_CLOUD") == "true":
+    try:
+        __import__("pysqlite3")
+        sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+    except ModuleNotFoundError:
+        pass
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
@@ -24,6 +31,28 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PERSIST_DIR = os.path.join(BASE_DIR, "chroma_langchain_db")
 
 # =================================================
+# Streamlit UI Title
+# =================================================
+st.title("📄 ChatPDF")
+st.write("---")
+
+# =================================================
+# OPENAI_API_KEY AI 키 입력 받고,
+# 환경 변수 등록, 하위 OpenAI 관련 API는 냅둬도됨. 
+# =================================================
+openai_key= st.text_input("OPENAI_API_KEY", type="password")
+
+if openai_key:
+    os.environ["OPENAI_API_KEY"] = openai_key
+
+# =================================================
+# Streamlit UI File Upload
+# =================================================
+
+uploaded_file = st.file_uploader("PDF 파일을 업로드하세요", type=["pdf"])
+st.write("---")
+
+# =================================================
 # Utils
 # =================================================
 def file_hash(uploaded_file) -> str:
@@ -37,15 +66,6 @@ def load_vectorstore(collection_name: str):
         embedding_function=embeddings,
         persist_directory=PERSIST_DIR,
     )
-
-# =================================================
-# Streamlit UI
-# =================================================
-st.title("📄 ChatPDF")
-st.write("---")
-
-uploaded_file = st.file_uploader("PDF 파일을 업로드하세요", type=["pdf"])
-st.write("---")
 
 # =================================================
 # PDF 처리
