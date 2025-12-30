@@ -21,6 +21,9 @@ import streamlit as st
 import tempfile
 import os
 import hashlib
+from streamlit_extras.buy_me_a_coffee import button
+
+button(username="bkmAI", floating=True, width=221)
 
 # =================================================
 # 기본 설정
