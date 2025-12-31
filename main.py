@@ -21,9 +21,34 @@ import streamlit as st
 import tempfile
 import os
 import hashlib
+
+# ✅ Streaming handler (callback)
+from langchain_core.callbacks import BaseCallbackHandler
+
 from streamlit_extras.buy_me_a_coffee import button
 
 button(username="bkmAI", floating=True, width=221)
+
+# =================================================
+# Streaming Callback Handler
+# =================================================
+class StreamlitTokenCallbackHandler(BaseCallbackHandler):
+    """LLM 토큰이 생성될 때마다 Streamlit UI에 실시간으로 출력"""
+
+    def __init__(self, container):
+        self.container = container
+        self.text = ""
+
+    def on_llm_start(self, *args, **kwargs):
+        self.text = ""
+        self.container.markdown("")
+
+    def on_llm_new_token(self, token: str, **kwargs):
+        self.text += token
+        self.container.markdown(self.text + "▌")
+
+    def on_llm_end(self, *args, **kwargs):
+        self.container.markdown(self.text)
 
 # =================================================
 # 기본 설정
@@ -41,9 +66,9 @@ st.write("---")
 
 # =================================================
 # OPENAI_API_KEY AI 키 입력 받고,
-# 환경 변수 등록, 하위 OpenAI 관련 API는 냅둬도됨. 
+# 환경 변수 등록, 하위 OpenAI 관련 API는 냅둬도됨.
 # =================================================
-openai_key= st.text_input("OPENAI_API_KEY", type="password")
+openai_key = st.text_input("OPENAI_API_KEY", type="password")
 
 if openai_key:
     os.environ["OPENAI_API_KEY"] = openai_key
@@ -51,7 +76,6 @@ if openai_key:
 # =================================================
 # Streamlit UI File Upload
 # =================================================
-
 uploaded_file = st.file_uploader("PDF 파일을 업로드하세요", type=["pdf"])
 st.write("---")
 
@@ -108,18 +132,23 @@ if uploaded_file is not None:
 
     st.write("---")
 
+    # =================================================
     # Retriever / QA
-    llm = ChatOpenAI(temperature=0, max_completion_tokens=2048)
+    # - MultiQueryRetriever는 스트리밍 끄는 게 안전(쿼리 생성 토큰이 화면에 섞이는 것 방지)
+    # =================================================
+    llm_for_queries = ChatOpenAI(temperature=0, max_completion_tokens=512, streaming=False)
+
     base_retriever = vector_store.as_retriever(search_kwargs={"k": 4})
 
     mqr = MultiQueryRetriever.from_llm(
         retriever=base_retriever,
-        llm=llm,
+        llm=llm_for_queries,
         include_original=True
     )
 
-    qa = RetrievalQA.from_chain_type(
-        llm=llm,
+    # (요약 버튼 등에서 쓰는 기본 QA: 스트리밍 없이)
+    qa_non_stream = RetrievalQA.from_chain_type(
+        llm=ChatOpenAI(temperature=0, max_completion_tokens=2048, streaming=False),
         retriever=mqr,
         return_source_documents=True
     )
@@ -127,7 +156,7 @@ if uploaded_file is not None:
     # 문서 요약
     if st.button("📌 문서 요약"):
         with st.spinner("🧠 문서 요약 생성 중..."):
-            result = qa.invoke({"query": "이 문서 핵심 요약해줘"})
+            result = qa_non_stream.invoke({"query": "이 문서 핵심 요약해줘"})
         st.subheader("📌 요약")
         st.write(result["result"])
 
@@ -141,9 +170,28 @@ if uploaded_file is not None:
     )
 
     if user_question and st.button("질문하기"):
-        with st.spinner("🔎 문서를 찾고 답변을 생성하는 중..."):
-            result = qa.invoke({"query": user_question})
+        # ✅ 스트리밍 출력 영역
+        stream_box = st.empty()
+        handler = StreamlitTokenCallbackHandler(stream_box)
 
+        # ✅ 답변 생성용 LLM: streaming=True + callbacks
+        llm_stream = ChatOpenAI(
+            temperature=0,
+            max_completion_tokens=2048,
+            streaming=True,
+            callbacks=[handler],
+        )
+
+        qa_stream = RetrievalQA.from_chain_type(
+            llm=llm_stream,
+            retriever=mqr,
+            return_source_documents=True
+        )
+
+        with st.spinner("🔎 문서를 찾고 답변을 생성하는 중..."):
+            result = qa_stream.invoke({"query": user_question})
+
+        # 스트리밍이 이미 위에서 출력되지만, 완료 후 확정 출력도 원하면 유지
         st.subheader("💬 답변")
         st.write(result["result"])
 
